@@ -1,6 +1,6 @@
 import Link from 'next/link';
-import { useEffect, useRef, useState } from 'react';
-import { getSession, logout } from '../lib/api';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { getSession, logout, subscribeToSession } from '../lib/api';
 import { disconnectSocket } from '../lib/socket';
 import { useRouter } from 'next/router';
 
@@ -30,6 +30,7 @@ function AccountMenu({ user, onLogout }) {
         onClick={() => setOpen((o) => !o)}
         aria-label="Account menu"
         aria-expanded={open}
+        className="account-avatar"
         style={{
           width: 34, height: 34, borderRadius: '50%', border: 'none', cursor: 'pointer',
           background: 'var(--gold)', color: '#1A1207', fontFamily: 'Space Grotesk, sans-serif',
@@ -62,12 +63,13 @@ function AccountMenu({ user, onLogout }) {
 }
 
 export default function Navbar() {
-  const [user, setUser] = useState(null);
+  // Subscribes to the session store instead of reading it once on mount, so the
+  // avatar appears the instant login/register succeeds — no page reload needed.
+  const user = useSyncExternalStore(subscribeToSession, getSession, () => null);
   const [showNewDeviceBanner, setShowNewDeviceBanner] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
-    setUser(getSession());
     if (sessionStorage.getItem('newDeviceLogin')) {
       setShowNewDeviceBanner(true);
       sessionStorage.removeItem('newDeviceLogin');
@@ -77,7 +79,6 @@ export default function Navbar() {
   function handleLogout() {
     logout();
     disconnectSocket();
-    setUser(null);
     router.push('/');
   }
 

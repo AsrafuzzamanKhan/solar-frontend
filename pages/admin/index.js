@@ -1,50 +1,216 @@
 import { useEffect, useState } from 'react';
-import { api } from '../../lib/api';
+import { api, getSession } from '../../lib/api';
 import { getSocket } from '../../lib/socket';
 import { useToast } from '../../context/ToastContext';
-import { SkeletonPanelList, SkeletonTable } from '../../components/Skeleton';
+import { SkeletonPanelList, SkeletonTable, SkeletonStatRow } from '../../components/Skeleton';
 
-const TABS = [
-  { key: 'review', label: 'Order Review Queue' },
-  { key: 'cash', label: 'Cash Collection' },
-  { key: 'products', label: 'Products' },
-  { key: 'partners', label: 'Partner Approvals' },
-  { key: 'users', label: 'Users' },
-  { key: 'settings', label: 'Settings' },
-  { key: 'audit', label: 'Audit Log' },
+function initialsFor(name) {
+  if (!name) return '?';
+  const parts = name.trim().split(/\s+/);
+  const first = parts[0]?.[0] || '';
+  const last = parts.length > 1 ? parts[parts.length - 1][0] : '';
+  return (first + last).toUpperCase();
+}
+
+function Avatar({ name, size = 34 }) {
+  return (
+    <div
+      className="mono"
+      style={{
+        width: size, height: size, borderRadius: '50%', background: 'var(--panel-line)', flexShrink: 0,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: size * 0.4, fontWeight: 700,
+      }}
+    >
+      {initialsFor(name)}
+    </div>
+  );
+}
+
+// `countKey` maps a nav item to a field on `counts` (below) so the sidebar can show
+// a live badge for work waiting on the admin, inbox-style.
+const NAV = [
+  { key: 'overview', label: 'Overview', icon: '📊' },
+  { key: 'review', label: 'Order Review Queue', icon: '📝', countKey: 'pendingReview' },
+  { key: 'cash', label: 'Cash Collection', icon: '💵', countKey: 'awaitingCash' },
+  { key: 'products', label: 'Products', icon: '📦' },
+  { key: 'partners', label: 'Partner Approvals', icon: '🤝', countKey: 'pendingPartners' },
+  { key: 'users', label: 'Users', icon: '👥' },
+  { key: 'settings', label: 'Settings', icon: '⚙️' },
+  { key: 'audit', label: 'Audit Log', icon: '🧾' },
 ];
 
 export default function AdminPanel() {
-  const [tab, setTab] = useState('review');
+  const [tab, setTab] = useState('overview');
+  const [counts, setCounts] = useState(null);
   const { showToast } = useToast();
+  const admin = getSession();
+
+  // One cheap combined fetch powers both the sidebar badges and the Overview cards —
+  // simpler and more honest than every tab separately reporting its own count.
+  function loadCounts() {
+    Promise.all([
+      api.get('/admin/orders/pending-review').catch(() => []),
+      api.get('/admin/orders/awaiting-cash').catch(() => []),
+      api.get('/admin/partners/pending').catch(() => []),
+      api.get('/admin/users').catch(() => []),
+      api.get('/products/admin/all').catch(() => []),
+    ]).then(([pendingReview, awaitingCash, pendingPartners, users, products]) => {
+      setCounts({
+        pendingReview: pendingReview.length,
+        awaitingCash: awaitingCash.length,
+        pendingPartners: pendingPartners.length,
+        users: users.length,
+        products: products.length,
+        activeProducts: products.filter((p) => p.active).length,
+      });
+    });
+  }
+
+  // Refetching on every tab switch keeps the badges honest after an admin acts on
+  // something (approve, collect, suspend...) without wiring a callback through every
+  // child component just to report "I changed something."
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(loadCounts, [tab]);
 
   // Live notice when a new down-payment order lands in the review queue.
   useEffect(() => {
     const socket = getSocket();
     if (!socket) return;
-    const onNewReview = () => showToast('A new order needs review or cash collection', 'info');
+    const onNewReview = () => { showToast('A new order needs review or cash collection', 'info'); loadCounts(); };
     socket.on('review:new', onNewReview);
     return () => socket.off('review:new', onNewReview);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showToast]);
+
+  const active = NAV.find((t) => t.key === tab);
+
+  return (
+    <div className="admin-shell">
+      <aside className="admin-sidebar">
+        <div className="admin-sidebar-header">
+          <div className="account-avatar" style={{ width: 38, height: 38, fontSize: 14, flexShrink: 0 }}>
+            {initialsFor(admin?.name)}
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <p style={{ fontWeight: 600, fontSize: 13.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {admin?.name || 'Admin'}
+            </p>
+            <p className="mono" style={{ fontSize: 11, color: 'var(--text-dim)' }}>ADMINISTRATOR</p>
+          </div>
+        </div>
+        <nav className="admin-nav">
+          {NAV.map((t) => (
+            <button key={t.key} className={`admin-nav-item${tab === t.key ? ' active' : ''}`} onClick={() => setTab(t.key)}>
+              <span aria-hidden="true">{t.icon}</span>
+              <span className="admin-nav-label">{t.label}</span>
+              {t.countKey && counts?.[t.countKey] > 0 && <span className="admin-nav-badge">{counts[t.countKey]}</span>}
+            </button>
+          ))}
+        </nav>
+      </aside>
+
+      <div className="admin-content">
+        <div className="tag gold" style={{ marginBottom: 10 }}>ADMIN</div>
+        <h1 style={{ marginBottom: 20 }}>{active?.label}</h1>
+
+        {tab === 'overview' && <Overview counts={counts} />}
+        {tab === 'review' && <ReviewQueue />}
+        {tab === 'cash' && <CashCollection />}
+        {tab === 'products' && <ProductManagement />}
+        {tab === 'partners' && <PartnerApprovals />}
+        {tab === 'users' && <UsersList />}
+        {tab === 'settings' && <SettingsPanel />}
+        {tab === 'audit' && <AuditLog />}
+      </div>
+
+      <style jsx>{`
+        .admin-shell { display: grid; grid-template-columns: 220px 1fr; gap: 28px; align-items: start; }
+        .admin-content { min-width: 0; }
+        .admin-sidebar { position: sticky; top: 24px; }
+        .admin-sidebar-header {
+          display: flex; align-items: center; gap: 10px;
+          padding: 4px 10px 18px; border-bottom: 1px solid var(--panel-line); margin-bottom: 12px;
+        }
+        .admin-nav { display: flex; flex-direction: column; gap: 4px; }
+        .admin-nav-item {
+          display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+          padding: 10px 12px; border-radius: 10px; border: none; background: none; cursor: pointer;
+          font-size: 13.5px; color: var(--text-dim); font-family: 'Inter', sans-serif;
+        }
+        .admin-nav-item:hover { background: var(--panel-line); color: var(--text); }
+        .admin-nav-item.active { background: var(--gold); color: #1A1207; font-weight: 600; }
+        .admin-nav-label { flex: 1; }
+        .admin-nav-badge {
+          background: var(--red); color: #fff; font-size: 11px; font-family: 'JetBrains Mono', monospace;
+          padding: 1px 7px; border-radius: 999px; min-width: 18px; text-align: center;
+        }
+        .admin-nav-item.active .admin-nav-badge { background: #1A1207; color: var(--gold-bright); }
+        @media (max-width: 900px) {
+          .admin-shell { grid-template-columns: 1fr; }
+          .admin-sidebar { position: static; min-width: 0; }
+          .admin-sidebar-header { border-bottom: none; margin-bottom: 8px; padding-bottom: 8px; }
+          .admin-nav { flex-direction: row; overflow-x: auto; gap: 8px; padding-bottom: 4px; min-width: 0; }
+          .admin-nav-item { flex: 0 0 auto; width: auto; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+function StatCard({ label, value, tone }) {
+  return (
+    <div className="card">
+      <div className={`tag${tone ? ` ${tone}` : ''}`} style={{ marginBottom: 10 }}>{label}</div>
+      <p className="mono" style={{ fontSize: 26 }}>{value}</p>
+    </div>
+  );
+}
+
+function Overview({ counts }) {
+  const [recent, setRecent] = useState(null);
+  const { showToast } = useToast();
+
+  useEffect(() => {
+    api.get('/admin/audit-logs?page=1').then(setRecent).catch((e) => showToast(e.message, 'error'));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (!counts) return <SkeletonStatRow count={5} />;
 
   return (
     <div>
-      <h1 style={{ marginBottom: 20 }}>Admin</h1>
-      <div style={{ display: 'flex', gap: 10, marginBottom: 24, flexWrap: 'wrap' }}>
-        {TABS.map((t) => (
-          <button key={t.key} className={tab === t.key ? 'btn' : 'btn secondary'} onClick={() => setTab(t.key)}>
-            {t.label}
-          </button>
-        ))}
+      <div className="grid cols-3" style={{ marginBottom: 24 }}>
+        <StatCard label="TOTAL USERS" value={counts.users} />
+        <StatCard label="PENDING REVIEW" value={counts.pendingReview} tone={counts.pendingReview > 0 ? 'gold' : 'teal'} />
+        <StatCard label="AWAITING CASH" value={counts.awaitingCash} tone={counts.awaitingCash > 0 ? 'gold' : 'teal'} />
+        <StatCard label="PENDING PARTNERS" value={counts.pendingPartners} tone={counts.pendingPartners > 0 ? 'gold' : 'teal'} />
+        <StatCard label="ACTIVE PRODUCTS" value={`${counts.activeProducts} / ${counts.products}`} tone="teal" />
       </div>
 
-      {tab === 'review' && <ReviewQueue />}
-      {tab === 'cash' && <CashCollection />}
-      {tab === 'products' && <ProductManagement />}
-      {tab === 'partners' && <PartnerApprovals />}
-      {tab === 'users' && <UsersList />}
-      {tab === 'settings' && <SettingsPanel />}
-      {tab === 'audit' && <AuditLog />}
+      <h3 style={{ marginBottom: 12 }}>Recent activity</h3>
+      {!recent ? (
+        <SkeletonTable rows={5} cols={4} />
+      ) : recent.entries.length === 0 ? (
+        <p style={{ color: 'var(--text-dim)' }}>No activity recorded yet.</p>
+      ) : (
+        <div className="card">
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>When</th><th>Actor</th><th>Action</th><th>Entity</th></tr></thead>
+              <tbody>
+                {recent.entries.slice(0, 6).map((entry) => (
+                  <tr key={entry._id}>
+                    <td className="mono" style={{ fontSize: 12 }}>{new Date(entry.createdAt).toLocaleString()}</td>
+                    <td>{entry.actor ? `${entry.actor.name} (${entry.actor.role})` : 'system'}</td>
+                    <td><span className="tag">{entry.action}</span></td>
+                    <td className="mono" style={{ fontSize: 12 }}>{entry.entityType}{entry.entityId ? ` · ${entry.entityId.toString().slice(-6)}` : ''}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -82,9 +248,12 @@ function ReviewQueue() {
       {orders.map((o) => (
         <div key={o._id} className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
-            <div>
-              <p style={{ fontWeight: 600 }}>{o.user?.name} · {o.user?.phone}</p>
-              <p style={{ color: 'var(--text-dim)', fontSize: 13 }}>Order total: ৳{o.totalAmount.toLocaleString()}</p>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+              <Avatar name={o.user?.name} />
+              <div>
+                <p style={{ fontWeight: 600 }}>{o.user?.name} · {o.user?.phone}</p>
+                <p style={{ color: 'var(--text-dim)', fontSize: 13 }}>Order total: ৳{o.totalAmount.toLocaleString()}</p>
+              </div>
             </div>
             <span className="tag gold">Pending Review</span>
           </div>
@@ -152,11 +321,14 @@ function CashCollection() {
       {rows.map(({ order, plan }) => (
         <div key={order._id} className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
-            <div>
-              <p style={{ fontWeight: 600 }}>{order.user?.name} · {order.user?.phone}</p>
-              <p style={{ color: 'var(--text-dim)', fontSize: 13 }}>
-                Order {order._id.slice(-6).toUpperCase()} · ৳{order.totalAmount.toLocaleString()} · {order.paymentType === 'full' ? 'Full payment' : 'Down payment'}
-              </p>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+              <Avatar name={order.user?.name} />
+              <div>
+                <p style={{ fontWeight: 600 }}>{order.user?.name} · {order.user?.phone}</p>
+                <p style={{ color: 'var(--text-dim)', fontSize: 13 }}>
+                  Order {order._id.slice(-6).toUpperCase()} · ৳{order.totalAmount.toLocaleString()} · {order.paymentType === 'full' ? 'Full payment' : 'Down payment'}
+                </p>
+              </div>
             </div>
             <span className="tag gold">{order.paymentType === 'full' ? 'Awaiting delivery payment' : 'Awaiting cash collection'}</span>
           </div>
@@ -370,10 +542,11 @@ function PartnerApprovals() {
     <div className="card">
       <div className="table-wrap">
         <table>
-          <thead><tr><th>Name</th><th>Contact</th><th>Referral Code</th><th></th></tr></thead>
+          <thead><tr><th></th><th>Name</th><th>Contact</th><th>Referral Code</th><th></th></tr></thead>
           <tbody>
             {partners.map((p) => (
               <tr key={p._id}>
+                <td style={{ width: 36 }}><Avatar name={p.user?.name} size={28} /></td>
                 <td>{p.user?.name}</td>
                 <td>{p.user?.phone}</td>
                 <td className="mono">{p.referralCode}</td>
@@ -390,9 +563,14 @@ function PartnerApprovals() {
   );
 }
 
+const ROLE_TAG_CLASS = { admin: 'tag gold', partner: 'tag teal', individual: 'tag' };
+
 function UsersList() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [roleFilter, setRoleFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
   const { showToast } = useToast();
 
   function load() {
@@ -411,30 +589,71 @@ function UsersList() {
 
   if (loading) return <SkeletonTable rows={6} cols={5} />;
 
+  const filtered = users.filter((u) => {
+    if (roleFilter !== 'all' && u.role !== roleFilter) return false;
+    if (statusFilter === 'active' && u.suspended) return false;
+    if (statusFilter === 'suspended' && !u.suspended) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      if (!u.name?.toLowerCase().includes(q) && !u.email?.toLowerCase().includes(q) && !u.phone?.includes(search)) return false;
+    }
+    return true;
+  });
+
   return (
-    <div className="card">
-      <div className="table-wrap">
-        <table>
-          <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Status</th><th></th></tr></thead>
-          <tbody>
-            {users.map((u) => (
-              <tr key={u._id}>
-                <td>{u.name}</td>
-                <td>{u.email}</td>
-                <td>{u.phone}</td>
-                <td><span className="tag">{u.role}</span></td>
-                <td><span className={`tag ${u.suspended ? 'red' : 'teal'}`}>{u.suspended ? 'suspended' : 'active'}</span></td>
-                <td>
-                  {u.role !== 'admin' && (
-                    <button className="btn secondary" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => toggleSuspend(u)}>
-                      {u.suspended ? 'Reactivate' : 'Suspend'}
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+    <div>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 16 }}>
+        <input
+          className="input"
+          style={{ maxWidth: 240 }}
+          placeholder="Search name, email, phone…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <select className="input" style={{ maxWidth: 160 }} value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}>
+          <option value="all">All roles</option>
+          <option value="individual">Individual</option>
+          <option value="partner">Partner</option>
+          <option value="admin">Admin</option>
+        </select>
+        <select className="input" style={{ maxWidth: 160 }} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+          <option value="all">All statuses</option>
+          <option value="active">Active</option>
+          <option value="suspended">Suspended</option>
+        </select>
+        <span className="mono" style={{ fontSize: 12.5, color: 'var(--text-dim)', marginLeft: 'auto' }}>
+          {filtered.length} of {users.length} users
+        </span>
+      </div>
+
+      <div className="card">
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th></th><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Status</th><th></th></tr></thead>
+            <tbody>
+              {filtered.map((u) => (
+                <tr key={u._id}>
+                  <td style={{ width: 36 }}><Avatar name={u.name} size={28} /></td>
+                  <td>{u.name}</td>
+                  <td>{u.email}</td>
+                  <td>{u.phone}</td>
+                  <td><span className={ROLE_TAG_CLASS[u.role] || 'tag'}>{u.role}</span></td>
+                  <td><span className={`tag ${u.suspended ? 'red' : 'teal'}`}>{u.suspended ? 'suspended' : 'active'}</span></td>
+                  <td>
+                    {u.role !== 'admin' && (
+                      <button className="btn secondary" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => toggleSuspend(u)}>
+                        {u.suspended ? 'Reactivate' : 'Suspend'}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {filtered.length === 0 && (
+                <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-dim)', padding: 24 }}>No users match those filters.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

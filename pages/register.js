@@ -10,6 +10,8 @@ export default function Register() {
   const [otp, setOtp] = useState('');
   const [error, setError] = useState('');
   const [resending, setResending] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [verifying, setVerifying] = useState(false);
   const router = useRouter();
   const { showToast } = useToast();
 
@@ -28,22 +30,34 @@ export default function Register() {
 
   async function submitForm(e) {
     e.preventDefault();
+    if (submitting) return;
     setError('');
+    setSubmitting(true);
     try {
       const res = await api.post('/auth/register', form, { auth: false });
       setUserId(res.userId);
       setStep('otp');
-    } catch (e) { setError(e.message); }
+      setSubmitting(false);
+    } catch (e) {
+      setError(e.message);
+      setSubmitting(false);
+    }
   }
 
   async function submitOtp(e) {
     e.preventDefault();
+    if (verifying) return;
     setError('');
+    setVerifying(true);
     try {
       const res = await api.post('/auth/verify-otp', { userId, otp }, { auth: false });
       saveSession(res.token, res.user);
       router.push('/');
-    } catch (e) { setError(e.message); }
+      // Left disabled through the redirect on purpose — see login.js for why.
+    } catch (e) {
+      setError(e.message);
+      setVerifying(false);
+    }
   }
 
   async function resendOtp() {
@@ -61,7 +75,7 @@ export default function Register() {
 
   if (step === 'otp') {
     return (
-      <div className="card" style={{ maxWidth: 400, margin: '0 auto' }}>
+      <div className="card auth-card" style={{ maxWidth: 400, margin: '0 auto' }}>
         <h2 style={{ marginBottom: 16 }}>Verify your email</h2>
         <p style={{ color: 'var(--text-dim)', fontSize: 13, marginBottom: 20 }}>
           {form.email ? `We sent a code to ${form.email}.` : 'We sent a code to your email.'} It expires in 10 minutes —
@@ -70,11 +84,13 @@ export default function Register() {
         <form onSubmit={submitOtp}>
           <div className="field">
             <label className="field-label">OTP CODE</label>
-            <input className="input" value={otp} onChange={(e) => setOtp(e.target.value)} required />
+            <input className="input" autoFocus disabled={verifying} value={otp} onChange={(e) => setOtp(e.target.value)} required />
           </div>
           {error && <p style={{ color: 'var(--red)', fontSize: 13, marginBottom: 12 }}>{error}</p>}
-          <button className="btn" style={{ width: '100%', marginBottom: 12 }}>Verify & continue</button>
-          <button type="button" className="btn secondary" style={{ width: '100%' }} onClick={resendOtp} disabled={resending}>
+          <button className="btn" style={{ width: '100%', marginBottom: 12 }} disabled={verifying}>
+            {verifying ? 'Verifying…' : 'Verify & continue'}
+          </button>
+          <button type="button" className="btn secondary" style={{ width: '100%' }} onClick={resendOtp} disabled={resending || verifying}>
             {resending ? 'Sending...' : 'Resend code'}
           </button>
         </form>
@@ -83,31 +99,33 @@ export default function Register() {
   }
 
   return (
-    <div className="card" style={{ maxWidth: 420, margin: '0 auto' }}>
+    <div className="card auth-card" style={{ maxWidth: 420, margin: '0 auto' }}>
       <h2 style={{ marginBottom: 16 }}>Create your account</h2>
       <form onSubmit={submitForm}>
         <div className="field">
           <label className="field-label">FULL NAME</label>
-          <input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+          <input className="input" autoFocus disabled={submitting} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
         </div>
         <div className="field">
           <label className="field-label">EMAIL</label>
-          <input className="input" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
+          <input className="input" type="email" disabled={submitting} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
         </div>
         <div className="field">
           <label className="field-label">PHONE</label>
-          <input className="input" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} required />
+          <input className="input" disabled={submitting} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} required />
         </div>
         <div className="field">
           <label className="field-label">PASSWORD</label>
-          <input className="input" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required />
+          <input className="input" type="password" disabled={submitting} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required />
         </div>
         <div className="field">
           <label className="field-label">REFERRAL CODE (optional)</label>
-          <input className="input" value={form.referredByCode} onChange={(e) => setForm({ ...form, referredByCode: e.target.value })} />
+          <input className="input" disabled={submitting} value={form.referredByCode} onChange={(e) => setForm({ ...form, referredByCode: e.target.value })} />
         </div>
         {error && <p style={{ color: 'var(--red)', fontSize: 13, marginBottom: 12 }}>{error}</p>}
-        <button className="btn" style={{ width: '100%' }}>Sign up</button>
+        <button className="btn" style={{ width: '100%' }} disabled={submitting}>
+          {submitting ? 'Creating account…' : 'Sign up'}
+        </button>
       </form>
     </div>
   );

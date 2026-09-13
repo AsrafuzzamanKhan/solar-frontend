@@ -11,7 +11,7 @@ export default function FinalCTA() {
       const mm = gsap.matchMedia();
       mm.add('(prefers-reduced-motion: no-preference)', () => {
         gsap.to(glow.current, {
-          boxShadow: '0 0 0 10px rgba(240,169,62,0)',
+          boxShadow: '0 0 0 10px rgba(183,121,31,0)',
           duration: 1.8,
           repeat: -1,
           ease: 'sine.out',
@@ -30,7 +30,7 @@ export default function FinalCTA() {
         marginTop: 64,
         padding: '40px 32px',
         textAlign: 'center',
-        background: 'linear-gradient(180deg, var(--panel) 0%, #1E2434 100%)',
+        background: 'linear-gradient(180deg, var(--panel) 0%, #F1E7D2 100%)',
       }}
     >
       <div className="tag gold" style={{ marginBottom: 14 }}>READY WHEN YOU ARE</div>
@@ -44,7 +44,7 @@ export default function FinalCTA() {
           ref={glow}
           href="/calculator"
           className="btn"
-          style={{ boxShadow: '0 0 0 0 rgba(240,169,62,0.55)' }}
+          style={{ boxShadow: '0 0 0 0 rgba(183,121,31,0.55)' }}
         >
           Get my free solar plan
         </Link>

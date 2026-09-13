@@ -140,8 +140,8 @@ export default function SolarHero() {
 
           {/* grid pylon, flickering */}
           <g transform="translate(230,50)" opacity="0.8">
-            <line x1="0" y1="0" x2="0" y2="40" stroke="var(--panel-line)" strokeWidth="3" />
-            <line x1="-14" y1="8" x2="14" y2="8" stroke="var(--panel-line)" strokeWidth="3" />
+            <line x1="0" y1="0" x2="0" y2="40" stroke="var(--text-dim)" strokeWidth="3" />
+            <line x1="-14" y1="8" x2="14" y2="8" stroke="var(--text-dim)" strokeWidth="3" />
             <circle ref={gridBulb} cx="0" cy="-8" r="6" fill="var(--red)" />
           </g>
 
